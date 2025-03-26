@@ -1,327 +1,179 @@
 package it.unive.lisa.tutorial;
 
-import it.unive.lisa.analysis.Lattice;
+import it.unive.lisa.analysis.ScopeToken;
 import it.unive.lisa.analysis.SemanticException;
 import it.unive.lisa.analysis.SemanticOracle;
 import it.unive.lisa.analysis.lattices.Satisfiability;
-import it.unive.lisa.analysis.nonrelational.value.BaseNonRelationalValueDomain;
-import it.unive.lisa.analysis.nonrelational.value.ValueEnvironment;
+import it.unive.lisa.analysis.value.ValueDomain;
 import it.unive.lisa.program.cfg.ProgramPoint;
-import it.unive.lisa.symbolic.value.Constant;
-import it.unive.lisa.symbolic.value.Identifier;
-import it.unive.lisa.symbolic.value.ValueExpression;
-import it.unive.lisa.symbolic.value.operator.AdditionOperator;
-import it.unive.lisa.symbolic.value.operator.DivisionOperator;
-import it.unive.lisa.symbolic.value.operator.MultiplicationOperator;
-import it.unive.lisa.symbolic.value.operator.SubtractionOperator;
-import it.unive.lisa.symbolic.value.operator.binary.BinaryOperator;
+import it.unive.lisa.symbolic.value.*;
 import it.unive.lisa.symbolic.value.operator.binary.ComparisonEq;
-import it.unive.lisa.symbolic.value.operator.binary.ComparisonGe;
-import it.unive.lisa.symbolic.value.operator.binary.ComparisonGt;
-import it.unive.lisa.symbolic.value.operator.binary.ComparisonLe;
-import it.unive.lisa.symbolic.value.operator.binary.ComparisonLt;
 import it.unive.lisa.symbolic.value.operator.binary.ComparisonNe;
-import it.unive.lisa.symbolic.value.operator.unary.NumericNegation;
-import it.unive.lisa.symbolic.value.operator.unary.UnaryOperator;
+import it.unive.lisa.symbolic.value.operator.unary.LogicalNegation;
 import it.unive.lisa.util.representation.StringRepresentation;
 import it.unive.lisa.util.representation.StructuredRepresentation;
 
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
+import java.util.function.Predicate;
 
-/**
- * An abstract domain that tracks equality relationships between variables.
- * It keeps track of which variables are equal to the current variable.
- */
-public class Equality implements BaseNonRelationalValueDomain<Equality> {
-
-    // We use a set to store the identifiers that are equal to this variable
-    private final Set<String> equalVariables;
-    
-    // Constants for the top and bottom elements
+public class Equality implements ValueDomain<Equality> {
+    public static final Equality BOTTOM = new Equality(Collections.emptySet());
     public static final Equality TOP = new Equality();
-    public static final Equality BOTTOM = new Equality(new HashSet<>());
-    
-    /**
-     * Creates a new top element.
-     */
+    private final Set<Set<Identifier>> equalities;
+
     public Equality() {
-        this.equalVariables = new HashSet<>();
+        this.equalities = new HashSet<>();
     }
-    
-    /**
-     * Creates a new element with the given set of equal variables.
-     * 
-     * @param equalVariables the set of variables that are equal to this one
-     */
-    public Equality(Set<String> equalVariables) {
-        this.equalVariables = equalVariables;
-    }
-    
-    /**
-     * Creates a new element with a single equal variable.
-     * 
-     * @param variable the variable that is equal to this one
-     */
-    public Equality(String variable) {
-        this.equalVariables = new HashSet<>();
-        if (variable != null) {
-            this.equalVariables.add(variable);
+
+    public Equality(Equality other) {
+        this.equalities = new HashSet<>();
+        for (Set<Identifier> eq : other.equalities) {
+            this.equalities.add(new HashSet<>(eq));
         }
     }
-    
+
+    private Equality(Set<Set<Identifier>> equalities) {
+        this.equalities = new HashSet<>(equalities);
+    }
+
+    private void addEquality(Identifier a, Identifier b) {
+        Set<Identifier> setA = findEqualitySet(a);
+        Set<Identifier> setB = findEqualitySet(b);
+        
+        if (setA != null && setB != null) {
+            setA.addAll(setB);
+            equalities.remove(setB);
+        } else if (setA != null) {
+            setA.add(b);
+        } else if (setB != null) {
+            setB.add(a);
+        } else {
+            equalities.add(new HashSet<>(Arrays.asList(a, b)));
+        }
+    }
+
+    private Set<Identifier> findEqualitySet(Identifier identifier) {
+        return equalities.stream().filter(set -> set.contains(identifier)).findFirst().orElse(null);
+    }
+
+    private void reassign(Identifier identifier) {
+        equalities.removeIf(set -> set.remove(identifier));
+        equalities.add(new HashSet<>(Collections.singleton(identifier)));
+    }
+
+    @Override
+    public boolean lessOrEqual(Equality other) {
+        return other.equalities.stream().allMatch(o -> equalities.stream().anyMatch(e -> e.containsAll(o)));
+    }
+
+    @Override
+    public Equality lub(Equality other) {
+        if (isBottom()) return other;
+        if (other.isBottom()) return this;
+        
+        Equality result = new Equality();
+        equalities.forEach(set -> set.forEach(result::reassign));
+        other.equalities.forEach(set -> set.forEach(result::reassign));
+        return result;
+    }
+
     @Override
     public Equality top() {
         return TOP;
     }
-    
+
+    @Override
+    public boolean isTop() {
+        return equalities.isEmpty();
+    }
+
     @Override
     public Equality bottom() {
         return BOTTOM;
     }
-    
-    @Override
-    public boolean isTop() {
-        return equalVariables != null && equalVariables.isEmpty();
-    }
-    
+
     @Override
     public boolean isBottom() {
-        return equalVariables == null;
+        return this == BOTTOM;
     }
-    
-    /**
-     * Returns the set of variables that are equal to this variable.
-     * 
-     * @return the set of equal variables
-     */
-    public Set<String> getEqualVariables() {
-        return isBottom() ? Collections.emptySet() : Collections.unmodifiableSet(equalVariables);
-    }
-    
-    /**
-     * Checks if this variable is equal to the given variable.
-     * 
-     * @param variable the variable to check
-     * @return true if the variables are equal
-     */
-    public boolean isEqualTo(String variable) {
-        return !isBottom() && equalVariables.contains(variable);
-    }
-    
+
     @Override
-    public boolean lessOrEqualAux(Equality other) throws SemanticException {
-        // If this is top, it's always greater than or equal to other
-        if (this.isTop())
-            return false;
-            
-        // If other is top, this is always less than or equal to other
-        if (other.isTop())
-            return true;
-            
-        // This is less than or equal to other if other contains all variables in this
-        return other.equalVariables.containsAll(this.equalVariables);
+    public Equality assign(Identifier identifier, ValueExpression valueExpression, ProgramPoint programPoint, SemanticOracle semanticOracle) {
+        Equality res = new Equality(this);
+        if (valueExpression instanceof Identifier) {
+            res.addEquality(identifier, (Identifier) valueExpression);
+        } else {
+            res.reassign(identifier);
+        }
+        return res;
     }
-    
+
     @Override
-    public Equality lubAux(Equality other) throws SemanticException {
-        // If either is top, the result is top
-        if (this.isTop() || other.isTop())
-            return TOP;
-            
-        // The union of equality sets represents variables equal in either element
-        Set<String> result = new HashSet<>(this.equalVariables);
-        result.retainAll(other.equalVariables);
-        
-        // If there are no common variables, the result is top
-        if (result.isEmpty())
-            return TOP;
-            
-        return new Equality(result);
+    public Equality assume(ValueExpression valueExpression, ProgramPoint programPoint, ProgramPoint programPoint1, SemanticOracle semanticOracle) {
+        Satisfiability result = satisfies(valueExpression, programPoint, semanticOracle);
+        return result == Satisfiability.NOT_SATISFIED ? bottom() : this;
     }
-    
+
     @Override
-    public Equality glbAux(Equality other) throws SemanticException {
-        // If either is top, the result is the other
-        if (this.isTop())
-            return other;
-        if (other.isTop())
-            return this;
-            
-        // The intersection represents variables equal in both elements
-        Set<String> result = new HashSet<>(this.equalVariables);
-        result.addAll(other.equalVariables);
-        
-        return new Equality(result);
+    public boolean knowsIdentifier(Identifier identifier) {
+        return equalities.stream().anyMatch(set -> set.contains(identifier));
     }
-    
+
     @Override
-    public Equality wideningAux(Equality other) throws SemanticException {
-        return lubAux(other);
+    public Equality forgetIdentifier(Identifier identifier) {
+        Equality res = new Equality(this);
+        res.equalities.forEach(set -> set.remove(identifier));
+        return res;
     }
-    
+
     @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        
-        Equality equality = (Equality) o;
-        
-        if (this.isBottom() && equality.isBottom())
-            return true;
-        if (this.isBottom() || equality.isBottom())
-            return false;
-        if (this.isTop() && equality.isTop())
-            return true;
-        if (this.isTop() || equality.isTop())
-            return false;
-            
-        return Objects.equals(equalVariables, equality.equalVariables);
+    public Equality forgetIdentifiersIf(Predicate<Identifier> predicate) {
+        Equality res = new Equality(this);
+        res.equalities.forEach(set -> set.removeIf(predicate));
+        return res;
     }
-    
+
     @Override
-    public int hashCode() {
-        return Objects.hashCode(equalVariables);
+    public Satisfiability satisfies(ValueExpression valueExpression, ProgramPoint programPoint, SemanticOracle semanticOracle) {
+        boolean inverted = false;
+        if (valueExpression instanceof UnaryExpression unary && unary.getOperator() instanceof LogicalNegation) {
+            valueExpression = (ValueExpression) unary.getExpression();
+            inverted = true;
+        }
+
+        if (!(valueExpression instanceof BinaryExpression binary) ||
+            !(binary.getOperator() instanceof ComparisonEq || binary.getOperator() instanceof ComparisonNe) ||
+            !(binary.getLeft() instanceof Identifier left && binary.getRight() instanceof Identifier right)) {
+            return Satisfiability.UNKNOWN;
+        }
+
+        boolean equal = equalities.stream().anyMatch(set -> set.contains(left) && set.contains(right));
+        return equal == (binary.getOperator() instanceof ComparisonEq) != inverted
+            ? Satisfiability.SATISFIED
+            : Satisfiability.NOT_SATISFIED;
     }
-    
+
+    @Override
+    public Equality pushScope(ScopeToken scopeToken) {
+        return this;
+    }
+
+    @Override
+    public Equality popScope(ScopeToken scopeToken) {
+        return this;
+    }
+
     @Override
     public StructuredRepresentation representation() {
-        if (isBottom())
-            return Lattice.bottomRepresentation();
-        if (isTop())
-            return Lattice.topRepresentation();
-            
-        return new StringRepresentation("Equal to: " + equalVariables);
+        return new StringRepresentation(isBottom() ? "⊥" : 
+            equalities.stream()
+                .map(set -> String.join(" = ", set.stream().map(Identifier::getName).toArray(String[]::new)))
+                .toList());
     }
-    
+
     @Override
-    public Equality evalNonNullConstant(Constant constant, ProgramPoint pp, SemanticOracle oracle) {
-        // Constants are not equal to any variable
-        return TOP;
-    }
-    
-    @Override
-    public Equality evalUnaryExpression(UnaryOperator operator, Equality arg, ProgramPoint pp, SemanticOracle oracle) {
-        if (arg.isBottom())
-            return bottom();
-            
-        if (operator instanceof NumericNegation) {
-            // Preserves the equality relationships
-            return arg;
-        }
-        
-        // For other operators, we lose track of equalities
-        return TOP;
-    }
-    
-    @Override
-    public Equality evalBinaryExpression(BinaryOperator operator, Equality left, Equality right, ProgramPoint pp, SemanticOracle oracle) {
-        if (left.isBottom() || right.isBottom())
-            return bottom();
-            
-        if (operator instanceof AdditionOperator ||
-            operator instanceof SubtractionOperator ||
-            operator instanceof MultiplicationOperator ||
-            operator instanceof DivisionOperator) {
-            // For arithmetic operations, we lose track of equalities
-            return TOP;
-        }
-        
-        // For other operators, we also lose track of equalities
-        return TOP;
-    }
-    
-    @Override
-    public Satisfiability satisfiesBinaryExpression(BinaryOperator operator, Equality left, Equality right, ProgramPoint pp, SemanticOracle oracle) {
-        if (left.isBottom() || right.isBottom())
-            return Satisfiability.BOTTOM;
-        
-        // If left and right have common equal variables, they might be equal
-        boolean haveCommonVariables = false;
-        for (String var : left.getEqualVariables()) {
-            if (right.isEqualTo(var)) {
-                haveCommonVariables = true;
-                break;
-            }
-        }
-        
-        if (operator instanceof ComparisonEq) {
-            if (haveCommonVariables)
-                return Satisfiability.SATISFIED;
-            if (left.isTop() || right.isTop())
-                return Satisfiability.UNKNOWN;
-            return Satisfiability.NOT_SATISFIED;
-        } else if (operator instanceof ComparisonNe) {
-            if (haveCommonVariables)
-                return Satisfiability.NOT_SATISFIED;
-            if (left.isTop() || right.isTop())
-                return Satisfiability.UNKNOWN;
-            return Satisfiability.SATISFIED;
-        }
-        
-        // For other comparisons, we can't determine satisfiability
-        return Satisfiability.UNKNOWN;
-    }
-    
-    @Override
-    public ValueEnvironment<Equality> assumeBinaryExpression(
-            ValueEnvironment<Equality> environment,
-            BinaryOperator operator,
-            ValueExpression left,
-            ValueExpression right,
-            ProgramPoint src,
-            ProgramPoint dest,
-            SemanticOracle oracle) throws SemanticException {
-        
-        // We only handle equality comparisons between identifiers
-        if (!(operator instanceof ComparisonEq) || !(left instanceof Identifier) || !(right instanceof Identifier))
-            return environment;
-            
-        Identifier leftId = (Identifier) left;
-        Identifier rightId = (Identifier) right;
-        
-        String leftName = leftId.getName();
-        String rightName = rightId.getName();
-        
-        // Get the current equality information for both variables
-        Equality leftEquality = environment.getState(leftId);
-        Equality rightEquality = environment.getState(rightId);
-        
-        if (leftEquality.isBottom() || rightEquality.isBottom())
-            return environment.bottom();
-            
-        // Create the updated equality sets for both variables
-        Set<String> newLeftVars = new HashSet<>(leftEquality.getEqualVariables());
-        newLeftVars.add(rightName);
-        for (String var : rightEquality.getEqualVariables()) {
-            newLeftVars.add(var);
-        }
-        
-        Set<String> newRightVars = new HashSet<>(rightEquality.getEqualVariables());
-        newRightVars.add(leftName);
-        for (String var : leftEquality.getEqualVariables()) {
-            newRightVars.add(var);
-        }
-        
-        // Update the environment with the new equality information
-        ValueEnvironment<Equality> result = environment;
-        result = result.putState(leftId, new Equality(newLeftVars));
-        result = result.putState(rightId, new Equality(newRightVars));
-        
-        // Update all other variables that are equal to either left or right
-        for (Identifier id : environment.getKeys()) {
-            if (!id.equals(leftId) && !id.equals(rightId)) {
-                Equality state = environment.getState(id);
-                if (state.isEqualTo(leftName) || state.isEqualTo(rightName)) {
-                    Set<String> newVars = new HashSet<>(state.getEqualVariables());
-                    newVars.addAll(newLeftVars);
-                    result = result.putState(id, new Equality(newVars));
-                }
-            }
-        }
-        
-        return result;
+    public Equality smallStepSemantics(ValueExpression expression, ProgramPoint pp, SemanticOracle oracle)
+            throws SemanticException {
+        return this;
     }
 }
