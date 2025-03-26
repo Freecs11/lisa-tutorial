@@ -1,13 +1,11 @@
 package it.unive.lisa.tutorial;
 
 import it.unive.lisa.analysis.Lattice;
-import it.unive.lisa.analysis.ScopeToken;
 import it.unive.lisa.analysis.SemanticException;
 import it.unive.lisa.analysis.SemanticOracle;
 import it.unive.lisa.analysis.lattices.Satisfiability;
 import it.unive.lisa.analysis.nonrelational.value.BaseNonRelationalValueDomain;
 import it.unive.lisa.analysis.nonrelational.value.ValueEnvironment;
-import it.unive.lisa.analysis.value.ValueDomain;
 import it.unive.lisa.program.cfg.ProgramPoint;
 import it.unive.lisa.symbolic.value.Constant;
 import it.unive.lisa.symbolic.value.Identifier;
@@ -32,13 +30,12 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
-import java.util.function.Predicate;
 
 /**
  * An abstract domain that tracks equality relationships between variables.
  * It keeps track of which variables are equal to the current variable.
  */
-public class Equality implements ValueDomain<Equality> {
+public class Equality implements BaseNonRelationalValueDomain<Equality> {
 
     // We use a set to store the identifiers that are equal to this variable
     private final Set<String> equalVariables;
@@ -74,17 +71,7 @@ public class Equality implements ValueDomain<Equality> {
             this.equalVariables.add(variable);
         }
     }
-
-    @Override
-    public boolean lessOrEqual(Equality equality) throws SemanticException {
-        return false;
-    }
-
-    @Override
-    public Equality lub(Equality equality) throws SemanticException {
-        return null;
-    }
-
+    
     @Override
     public Equality top() {
         return TOP;
@@ -124,7 +111,19 @@ public class Equality implements ValueDomain<Equality> {
         return !isBottom() && equalVariables.contains(variable);
     }
     
-
+    @Override
+    public boolean lessOrEqualAux(Equality other) throws SemanticException {
+        // If this is top, it's always greater than or equal to other
+        if (this.isTop())
+            return false;
+            
+        // If other is top, this is always less than or equal to other
+        if (other.isTop())
+            return true;
+            
+        // This is less than or equal to other if other contains all variables in this
+        return other.equalVariables.containsAll(this.equalVariables);
+    }
     
     @Override
     public Equality lubAux(Equality other) throws SemanticException {
@@ -324,50 +323,5 @@ public class Equality implements ValueDomain<Equality> {
         }
         
         return result;
-    }
-
-    @Override
-    public Equality assign(Identifier identifier, ValueExpression valueExpression, ProgramPoint programPoint, SemanticOracle semanticOracle) throws SemanticException {
-        return null;
-    }
-
-    @Override
-    public Equality smallStepSemantics(ValueExpression valueExpression, ProgramPoint programPoint, SemanticOracle semanticOracle) throws SemanticException {
-        return null;
-    }
-
-    @Override
-    public Equality assume(ValueExpression valueExpression, ProgramPoint programPoint, ProgramPoint programPoint1, SemanticOracle semanticOracle) throws SemanticException {
-        return null;
-    }
-
-    @Override
-    public boolean knowsIdentifier(Identifier identifier) {
-        return false;
-    }
-
-    @Override
-    public Equality forgetIdentifier(Identifier identifier) throws SemanticException {
-        return null;
-    }
-
-    @Override
-    public Equality forgetIdentifiersIf(Predicate<Identifier> predicate) throws SemanticException {
-        return null;
-    }
-
-    @Override
-    public Satisfiability satisfies(ValueExpression valueExpression, ProgramPoint programPoint, SemanticOracle semanticOracle) throws SemanticException {
-        return null;
-    }
-
-    @Override
-    public Equality pushScope(ScopeToken scopeToken) throws SemanticException {
-        return null;
-    }
-
-    @Override
-    public Equality popScope(ScopeToken scopeToken) throws SemanticException {
-        return null;
     }
 }
