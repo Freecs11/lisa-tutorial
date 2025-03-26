@@ -12,18 +12,18 @@ import it.unive.lisa.interprocedural.ReturnTopPolicy;
 import it.unive.lisa.program.Program;
 import org.junit.Test;
 
-public class ConcreteValueTest {
+public class SetOfIntegerValuesTest {
 
 	@Test
 	public void testInterval() throws ParsingException, AnalysisException {
 		// we parse the program to get the CFG representation of the code in it
-		Program program = IMPFrontend.processFile("inputs/concretevalue.imp");
+		Program program = IMPFrontend.processFile("inputs/setofintegervalues.imp");
 
 		// we build a new configuration for the analysis
 		LiSAConfiguration conf = new DefaultConfiguration();
 
 		// we specify where we want files to be generated
-		conf.workdir = "outputs/concretevalue";
+		conf.workdir = "outputs/setofintegervalues";
 
 		// we specify the visual format of the analysis results
 		conf.analysisGraphs = GraphType.HTML;
@@ -31,7 +31,7 @@ public class ConcreteValueTest {
 		// we specify the analysis that we want to execute
 		conf.abstractState = DefaultConfiguration.simpleState(
 				DefaultConfiguration.defaultHeapDomain(),
-				new ValueEnvironment<>(ConcreteValue.TOP
+				new ValueEnvironment<>(SetOfIntegerValues.TOP
 
 				),
 				DefaultConfiguration.defaultTypeDomain());

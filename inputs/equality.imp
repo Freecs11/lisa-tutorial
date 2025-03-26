@@ -1,0 +1,92 @@
+class equality {
+    // Simple equality test
+    basic() {
+        def a = 5;
+        def b = 5;
+        def c = a;     // c equal to a
+        
+        // Test equality with conditions
+        if (a == b) {
+            def d = b;  // d should be equal to a and b
+        }
+        
+        // Variable reassignment
+        a = 10;       // a is no longer equal to b and c
+        def e = a;    // e should be equal to a but not b or c
+    }
+    
+    // Equality with operations
+    operations() {
+        def x = 7;
+        def y = x;     // y is equal to x
+        
+        // Operations break equality relationships
+        def z = x + 3;
+        def w = y + 3; // w and z have same value but equality isn't tracked after operations
+        
+        // But direct assignment restores it
+        def v = w;     // v is equal to w
+    }
+    
+    // Test branching with equality
+    branches(p, q) {
+        def result = 0;
+        
+        if (p == q) {
+            // p and q are equal in this branch
+            result = p;  // result is equal to p and q
+        } else {
+            // p and q are not equal in this branch
+            result = p + q;  // result is not equal to either p or q
+        }
+        
+        return result;
+    }
+    
+    // Test equality propagation through assignments
+    propagation() {
+        def a = 1;
+        def b = a;      // b is equal to a
+        def c = b;      // c is equal to a and b
+        def d = c;      // d is equal to a, b, and c
+        
+        if (a == d) {
+            // This condition should always be true
+            def e = a;  // e is equal to a, b, c, and d
+            def f = d;  // f is equal to a, b, c, d, and e
+        }
+        
+        // Break one equality relationship
+        a = 5;         // a is no longer equal to b, c, or d
+        
+        // Test transitive equality
+        if (b == d) {
+            // This condition should still be true
+            def g = b;  // g is equal to b, c, and d
+        }
+    }
+    
+    // Test loop with equality
+    loop() {
+        def i = 0;
+        def j = 0;     // j is equal to i
+        def k = j;     // k is equal to i and j
+        
+        while (i < 10) {
+            // Equality is maintained in the loop
+            def temp = i;  // temp is equal to i, j, and k at first iteration
+            i = i + 1;     // i is no longer equal to j and k
+            j = j + 1;     // j is no longer equal to k 
+            k = k + 1;     // All three have same value but are not considered equal
+        }
+        
+        // After the loop, they should have same value but no equality relationship
+        def result = 0;
+        if (i == j && j == k) {
+            // This should be true by value, but the domain won't track it
+            result = i;
+        }
+        
+        return result;
+    }
+}
