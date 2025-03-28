@@ -24,6 +24,8 @@ import it.unive.lisa.util.numeric.MathNumberConversionException;
 import it.unive.lisa.util.representation.StringRepresentation;
 import it.unive.lisa.util.representation.StructuredRepresentation;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.Objects;
 
 public class RoundedInterval
@@ -33,45 +35,54 @@ public class RoundedInterval
 	public static final RoundedInterval TOP = new RoundedInterval(IntInterval.INFINITY);
 	public static final RoundedInterval BOTTOM = new RoundedInterval(new IntInterval(MathNumber.MINUS_INFINITY,MathNumber.MINUS_INFINITY));
 
+	// Default rounding direction: -1 = down, 0 = none, 1 = up
+	private static final int DEFAULT_ROUNDING_DIRECTION = 0;
+	
+	// Default precision is 2 digits after decimal point
+	private static final int DEFAULT_PRECISION = 2;
+
 	// The abstract information carried by this instance is an interval for a single variable
 	public final IntInterval interval;
 	
-	// Rounding mode: -1 = round down, 0 = no rounding, 1 = round up
-	private final int roundingMode;
+	// Rounding direction: -1 = round down, 0 = no rounding, 1 = round up
+	private final int roundingDirection;
 	
-	public RoundedInterval(
-			IntInterval interval) {
-		this(interval, 0);
+	// Precision: number of decimal places to keep (e.g., 2 means round to 2 decimal places)
+	private final int precision;
+	
+	public RoundedInterval(IntInterval interval) {
+		this(interval, DEFAULT_ROUNDING_DIRECTION, DEFAULT_PRECISION);
 	}
 	
-	public RoundedInterval(
-			IntInterval interval,
-			int roundingMode) {
+	public RoundedInterval(IntInterval interval, int roundingDirection) {
+		this(interval, roundingDirection, DEFAULT_PRECISION);
+	}
+	
+	public RoundedInterval(IntInterval interval, int roundingDirection, int precision) {
 		this.interval = interval;
-		this.roundingMode = roundingMode;
+		this.roundingDirection = roundingDirection;
+		this.precision = Math.max(0, precision); // Precision cannot be negative
 	}
 
-	public RoundedInterval(
-			MathNumber low,
-			MathNumber high) {
-		this(new IntInterval(low, high), 0);
+	public RoundedInterval(MathNumber low, MathNumber high) {
+		this(new IntInterval(low, high), DEFAULT_ROUNDING_DIRECTION, DEFAULT_PRECISION);
 	}
 	
-	public RoundedInterval(
-			MathNumber low,
-			MathNumber high,
-			int roundingMode) {
-		this(new IntInterval(low, high), roundingMode);
+	public RoundedInterval(MathNumber low, MathNumber high, int roundingDirection) {
+		this(new IntInterval(low, high), roundingDirection, DEFAULT_PRECISION);
 	}
-
+	
+	public RoundedInterval(MathNumber low, MathNumber high, int roundingDirection, int precision) {
+		this(new IntInterval(low, high), roundingDirection, precision);
+	}
 
 	public RoundedInterval() {
-		this(IntInterval.INFINITY, 0);
+		this(IntInterval.INFINITY, DEFAULT_ROUNDING_DIRECTION, DEFAULT_PRECISION);
 	}
 
 	@Override
 	public int hashCode() {
-		return Objects.hash(interval, roundingMode);
+		return Objects.hash(interval, roundingDirection, precision);
 	}
 
 	@Override
@@ -81,7 +92,9 @@ public class RoundedInterval
 		if (o == null || getClass() != o.getClass())
 			return false;
 		RoundedInterval other = (RoundedInterval) o;
-		return Objects.equals(interval, other.interval) && roundingMode == other.roundingMode;
+		return Objects.equals(interval, other.interval) && 
+		       roundingDirection == other.roundingDirection &&
+		       precision == other.precision;
 	}
 
 	@Override
@@ -107,10 +120,12 @@ public class RoundedInterval
 			throws SemanticException {
 		MathNumber newLow = interval.getLow().min(other.interval.getLow());
 		MathNumber newHigh = interval.getHigh().max(other.interval.getHigh());
-		int newRoundingMode = Math.max(roundingMode, other.roundingMode);
+		// Take the most conservative values from both intervals
+		int newRoundingDirection = Math.max(roundingDirection, other.roundingDirection);
+		int newPrecision = Math.min(precision, other.precision); // Use the lower precision
 		return newLow.isMinusInfinity() && newHigh.isPlusInfinity() 
 			? top() 
-			: new RoundedInterval(newLow, newHigh, newRoundingMode);
+			: new RoundedInterval(newLow, newHigh, newRoundingDirection, newPrecision);
 	}
 
 	@Override
@@ -121,10 +136,14 @@ public class RoundedInterval
 
 		if (newLow.compareTo(newHigh) > 0)
 			return bottom();
-		int newRoundingMode = Math.min(roundingMode, other.roundingMode);
+		
+		// Take the least conservative values from both intervals
+		int newRoundingDirection = Math.min(roundingDirection, other.roundingDirection);
+		int newPrecision = Math.max(precision, other.precision); // Use the higher precision
+		
 		return newLow.isMinusInfinity() && newHigh.isPlusInfinity() 
 			? top() 
-			: new RoundedInterval(newLow, newHigh, newRoundingMode);
+			: new RoundedInterval(newLow, newHigh, newRoundingDirection, newPrecision);
 	}
 
 	@Override
@@ -142,47 +161,74 @@ public class RoundedInterval
 		else
 			newLow = interval.getLow();
 			
-		// Keep the rounding mode from this instance
+		// Keep the rounding direction and precision from this instance
 		return newLow.isMinusInfinity() && newHigh.isPlusInfinity() 
 			? top() 
-			: new RoundedInterval(newLow, newHigh, roundingMode);
+			: new RoundedInterval(newLow, newHigh, roundingDirection, precision);
 	}
 	
 	/**
-	 * Applies rounding to a result based on the current rounding mode.
+	 * Rounds a double value according to the specified precision and rounding direction.
+	 * 
+	 * @param value the value to round
+	 * @return the rounded value
+	 */
+	private double roundValue(double value) {
+		if (Double.isInfinite(value) || Double.isNaN(value)) {
+			return value; // Can't round infinities or NaN
+		}
+		
+		BigDecimal bd = BigDecimal.valueOf(value);
+		RoundingMode mode;
+		
+		if (roundingDirection < 0) {
+			mode = RoundingMode.DOWN;
+		} else if (roundingDirection > 0) {
+			mode = RoundingMode.UP;
+		} else {
+			mode = RoundingMode.HALF_UP; // Standard mathematical rounding when no direction specified
+		}
+		
+		return bd.setScale(precision, mode).doubleValue();
+	}
+	
+	/**
+	 * Applies rounding to a result based on the current precision and rounding direction.
 	 * 
 	 * @param result the interval to round
 	 * @return the rounded interval
 	 */
 	private RoundedInterval applyRounding(IntInterval result) throws MathNumberConversionException {
-		// If no rounding needed or interval is invalid, return as is
-		if (roundingMode == 0 || result == null){
-			return new RoundedInterval(result, roundingMode);
+		// If interval is invalid, return as is
+		if (result == null) {
+			return new RoundedInterval(result, roundingDirection, precision);
 		}
 		
 		MathNumber low = result.getLow();
 		MathNumber high = result.getHigh();
 		
-		// When rounding down (mode -1), we decrease the upper bound if it's not an integer
-		if (roundingMode < 0) {
-			if (!high.isPlusInfinity()) {
-				// Check if high is not an integer (i.e., has decimal part)
-				if (high.toDouble() != Math.floor(high.toDouble())) {
-					high = new MathNumber(Math.floor(high.toDouble()));
-				}
-			}
-		}
-		// When rounding up (mode 1), we increase the lower bound if it's not an integer
-		else if (roundingMode > 0) {
-			if (!low.isMinusInfinity()) {
-				// Check if low is not an integer (i.e., has decimal part)
-				if (low.toDouble() != Math.ceil(low.toDouble())) {
-					low = new MathNumber(Math.ceil(low.toDouble()));
-				}
-			}
+		// Only apply rounding to finite values
+		if (!low.isMinusInfinity()) {
+			// Convert to double to apply precision-based rounding
+			double lowValue = low.toDouble();
+			// Apply rounding according to precision and direction
+			double roundedLow = roundValue(lowValue);
+			// Convert back to MathNumber
+			low = new MathNumber(roundedLow);
 		}
 		
-		return new RoundedInterval(new IntInterval(low, high), roundingMode);
+		if (!high.isPlusInfinity()) {
+			// Convert to double to apply precision-based rounding
+			double highValue = high.toDouble();
+			// Apply rounding according to precision and direction
+			double roundedHigh = roundValue(highValue);
+			// Convert back to MathNumber
+			high = new MathNumber(roundedHigh);
+		}
+		
+		// Create a new interval with the rounded values 
+		// and preserve the precision and rounding direction
+		return new RoundedInterval(new IntInterval(low, high), roundingDirection, precision);
 	}
 
 	@Override
@@ -191,12 +237,12 @@ public class RoundedInterval
 			return Lattice.bottomRepresentation();
 		
 		String roundingIndicator = "";
-		if (roundingMode < 0)
+		if (roundingDirection < 0)
 			roundingIndicator = "↓";
-		else if (roundingMode > 0)
+		else if (roundingDirection > 0)
 			roundingIndicator = "↑";
 			
-		return new StringRepresentation(interval.toString() + roundingIndicator);
+		return new StringRepresentation(interval.toString() + roundingIndicator + "(p=" + precision + ")");
 	}
 
 	@Override
@@ -213,16 +259,20 @@ public class RoundedInterval
 			SemanticOracle oracle) {
 		if (constant.getValue() instanceof Integer) {
 			Integer i = (Integer) constant.getValue();
-			return new RoundedInterval(new MathNumber(i), new MathNumber(i), roundingMode);
+			return new RoundedInterval(new MathNumber(i), new MathNumber(i), roundingDirection, precision);
 		} else if (constant.getValue() instanceof Float || constant.getValue() instanceof Double) {
-			// For floating point constants, we apply the current rounding mode
+			// For floating point constants, we need to be very precise with rounding
 			Number n = (Number) constant.getValue();
 			double value = n.doubleValue();
-			if (roundingMode < 0)
-				value = Math.floor(value);
-			else if (roundingMode > 0)
-				value = Math.ceil(value);
-			return new RoundedInterval(new MathNumber(value), new MathNumber(value), roundingMode);
+			
+			// Apply rounding based on precision
+			double roundedValue = roundValue(value);
+			
+			// Ensure the value is properly rounded according to our precision
+			MathNumber mathNumber = new MathNumber(roundedValue);
+			
+			// Create a precise interval for this constant
+			return new RoundedInterval(mathNumber, mathNumber, roundingDirection, precision);
 		}
 
 		return top();
@@ -245,11 +295,274 @@ public class RoundedInterval
                 }
             }
 		else if (operator == StringLength.INSTANCE)
-			return new RoundedInterval(MathNumber.ZERO, MathNumber.PLUS_INFINITY, roundingMode);
+			return new RoundedInterval(MathNumber.ZERO, MathNumber.PLUS_INFINITY, roundingDirection, precision);
 		else
 			return top();
 	}
 
+	/**
+	 *  addition of two intervals with proper precision handling
+	 * @param left the left operand
+	 * @param right the right operand
+	 * @param roundingDirection the rounding direction to apply
+	 * @param precision the decimal precision to maintain
+	 * @return a new rounded interval with the result
+	 */
+	private RoundedInterval preciseAdd(RoundedInterval left, RoundedInterval right, int roundingDirection, int precision) {
+		// Handle special cases
+		if (left.isBottom() || right.isBottom())
+			return bottom();
+		if (left.isTop() || right.isTop())
+			return top();
+		
+		try {
+			// Extract exact numeric bounds for direct computation
+			MathNumber leftLow = left.interval.getLow();
+			MathNumber leftHigh = left.interval.getHigh();
+			MathNumber rightLow = right.interval.getLow();
+			MathNumber rightHigh = right.interval.getHigh();
+			
+			// Compute the new values manually for precise control
+			double newLowValue, newHighValue;
+			
+			// Calculate the new low bound (handle infinities)
+			if (leftLow.isMinusInfinity() || rightLow.isMinusInfinity()) {
+				newLowValue = Double.NEGATIVE_INFINITY;
+			} else {
+				// Precise addition of lower bounds with explicit handling of precision
+				newLowValue = roundValue(leftLow.toDouble() + rightLow.toDouble());
+			}
+			
+			// Calculate the new high bound (handle infinities)
+			if (leftHigh.isPlusInfinity() || rightHigh.isPlusInfinity()) {
+				newHighValue = Double.POSITIVE_INFINITY;
+			} else {
+				// Precise addition of upper bounds with explicit handling of precision
+				newHighValue = roundValue(leftHigh.toDouble() + rightHigh.toDouble());
+			}
+			
+			// Create new bounds with properly rounded values
+			MathNumber newLow = newLowValue == Double.NEGATIVE_INFINITY ? 
+					MathNumber.MINUS_INFINITY : new MathNumber(newLowValue);
+			MathNumber newHigh = newHighValue == Double.POSITIVE_INFINITY ? 
+					MathNumber.PLUS_INFINITY : new MathNumber(newHighValue);
+			
+			// Create a new interval with the rounded bounds
+			return new RoundedInterval(new IntInterval(newLow, newHigh), roundingDirection, precision);
+		} catch (Exception e) {
+			// In case of any mathematical errors, return top
+			return top();
+		}
+	}
+	
+	/**
+	 * subtraction of two intervals with proper precision handling
+	 * @param left the left operand
+	 * @param right the right operand
+	 * @param roundingDirection the rounding direction to apply
+	 * @param precision the decimal precision to maintain
+	 * @return a new rounded interval with the result
+	 */
+	private RoundedInterval preciseSubtract(RoundedInterval left, RoundedInterval right, int roundingDirection, int precision) {
+		// Handle special cases
+		if (left.isBottom() || right.isBottom())
+			return bottom();
+		if (left.isTop() || right.isTop())
+			return top();
+		
+		try {
+			// Extract exact numeric bounds for direct computation
+			MathNumber leftLow = left.interval.getLow();
+			MathNumber leftHigh = left.interval.getHigh();
+			MathNumber rightLow = right.interval.getLow();
+			MathNumber rightHigh = right.interval.getHigh();
+			
+			// Compute the new values manually for precise control (low - high, high - low)
+			double newLowValue, newHighValue;
+			
+			// Calculate the new low bound (handle infinities)
+			if (leftLow.isMinusInfinity() || rightHigh.isPlusInfinity()) {
+				newLowValue = Double.NEGATIVE_INFINITY;
+			} else {
+				// Precise subtraction with explicit rounding
+				newLowValue = roundValue(leftLow.toDouble() - rightHigh.toDouble());
+			}
+			
+			// Calculate the new high bound (handle infinities)
+			if (leftHigh.isPlusInfinity() || rightLow.isMinusInfinity()) {
+				newHighValue = Double.POSITIVE_INFINITY;
+			} else {
+				// Precise subtraction with explicit rounding
+				newHighValue = roundValue(leftHigh.toDouble() - rightLow.toDouble());
+			}
+			
+			// Create new bounds with properly rounded values
+			MathNumber newLow = newLowValue == Double.NEGATIVE_INFINITY ? 
+					MathNumber.MINUS_INFINITY : new MathNumber(newLowValue);
+			MathNumber newHigh = newHighValue == Double.POSITIVE_INFINITY ? 
+					MathNumber.PLUS_INFINITY : new MathNumber(newHighValue);
+			
+			// Create a new interval with the rounded bounds
+			return new RoundedInterval(new IntInterval(newLow, newHigh), roundingDirection, precision);
+		} catch (Exception e) {
+			// In case of any mathematical errors, return top
+			return top();
+		}
+	}
+	
+	/**
+	 * multiplication of two intervals with proper precision handling
+	 * @param left the left operand
+	 * @param right the right operand
+	 * @param roundingDirection the rounding direction to apply
+	 * @param precision the decimal precision to maintain
+	 * @return a new rounded interval with the result
+	 */
+	private RoundedInterval preciseMultiply(RoundedInterval left, RoundedInterval right, int roundingDirection, int precision) {
+		// Handle special cases
+		if (left.isBottom() || right.isBottom())
+			return bottom();
+		if (left.equals(ZERO) || right.equals(ZERO))
+			return new RoundedInterval(IntInterval.ZERO, roundingDirection, precision);
+		if (left.isTop() || right.isTop())
+			return top();
+			
+		try {
+			// Extract the bounds for computation
+			MathNumber leftLow = left.interval.getLow();
+			MathNumber leftHigh = left.interval.getHigh();
+			MathNumber rightLow = right.interval.getLow();
+			MathNumber rightHigh = right.interval.getHigh();
+			
+			// Calculate all possible products for the interval bounds
+			double ll = Double.NEGATIVE_INFINITY, lh = Double.NEGATIVE_INFINITY;
+			double hl = Double.NEGATIVE_INFINITY, hh = Double.NEGATIVE_INFINITY;
+			
+			// Calculate products, handling infinities
+			if (!leftLow.isMinusInfinity() && !rightLow.isMinusInfinity())
+				ll = leftLow.toDouble() * rightLow.toDouble();
+			if (!leftLow.isMinusInfinity() && !rightHigh.isPlusInfinity())
+				lh = leftLow.toDouble() * rightHigh.toDouble();
+			if (!leftHigh.isPlusInfinity() && !rightLow.isMinusInfinity())
+				hl = leftHigh.toDouble() * rightLow.toDouble();
+			if (!leftHigh.isPlusInfinity() && !rightHigh.isPlusInfinity())
+				hh = leftHigh.toDouble() * rightHigh.toDouble();
+			
+			// Find the minimum and maximum of these products
+			double min = Double.POSITIVE_INFINITY;
+			double max = Double.NEGATIVE_INFINITY;
+			
+			for (double val : new double[] { ll, lh, hl, hh }) {
+				if (val != Double.NEGATIVE_INFINITY && val < min)
+					min = val;
+				if (val > max)
+					max = val;
+			}
+			
+			// Handle the case where all values were infinities
+			if (min == Double.POSITIVE_INFINITY)
+				min = Double.NEGATIVE_INFINITY;
+			if (max == Double.NEGATIVE_INFINITY)
+				max = Double.POSITIVE_INFINITY;
+			
+			// Round the result values according to precision
+			double roundedMin = min == Double.NEGATIVE_INFINITY ? min : roundValue(min);
+			double roundedMax = max == Double.POSITIVE_INFINITY ? max : roundValue(max);
+			
+			// Create MathNumber objects with the rounded values
+			MathNumber newLow = roundedMin == Double.NEGATIVE_INFINITY ? 
+					MathNumber.MINUS_INFINITY : new MathNumber(roundedMin);
+			MathNumber newHigh = roundedMax == Double.POSITIVE_INFINITY ? 
+					MathNumber.PLUS_INFINITY : new MathNumber(roundedMax);
+			
+			// Create the result interval with the proper bounds
+			return new RoundedInterval(new IntInterval(newLow, newHigh), roundingDirection, precision);
+		} catch (Exception e) {
+			// In case of any mathematical errors, return top
+			return top();
+		}
+	}
+	
+	/**
+	 * division of two intervals with proper precision handling
+	 * @param left the left operand
+	 * @param right the right operand
+	 * @param roundingDirection the rounding direction to apply
+	 * @param precision the decimal precision to maintain
+	 * @return a new rounded interval with the result
+	 */
+	private RoundedInterval preciseDivide(RoundedInterval left, RoundedInterval right, int roundingDirection, int precision) {
+		// Handle special cases
+		if (left.isBottom() || right.isBottom())
+			return bottom();
+		if (right.equals(ZERO))
+			return bottom(); // Division by zero
+		if (left.equals(ZERO))
+			return new RoundedInterval(IntInterval.ZERO, roundingDirection, precision);
+		if (left.isTop() || right.isTop())
+			return top();
+		
+		// Check if zero is in the right interval
+		if ((right.interval.getLow().compareTo(MathNumber.ZERO) <= 0 && 
+			 right.interval.getHigh().compareTo(MathNumber.ZERO) >= 0))
+			return top(); // Potential division by zero
+			
+		try {
+			// Extract the bounds for computation
+			MathNumber leftLow = left.interval.getLow();
+			MathNumber leftHigh = left.interval.getHigh();
+			MathNumber rightLow = right.interval.getLow();
+			MathNumber rightHigh = right.interval.getHigh();
+			
+			// Calculate all possible divisions for the interval bounds
+			double ll = Double.NEGATIVE_INFINITY, lh = Double.NEGATIVE_INFINITY;
+			double hl = Double.NEGATIVE_INFINITY, hh = Double.NEGATIVE_INFINITY;
+			
+			// Calculate divisions while avoiding division by zero
+			if (!leftLow.isMinusInfinity() && !rightLow.isMinusInfinity() && rightLow.toDouble() != 0)
+				ll = leftLow.toDouble() / rightLow.toDouble();
+			if (!leftLow.isMinusInfinity() && !rightHigh.isPlusInfinity() && rightHigh.toDouble() != 0)
+				lh = leftLow.toDouble() / rightHigh.toDouble();
+			if (!leftHigh.isPlusInfinity() && !rightLow.isMinusInfinity() && rightLow.toDouble() != 0)
+				hl = leftHigh.toDouble() / rightLow.toDouble();
+			if (!leftHigh.isPlusInfinity() && !rightHigh.isPlusInfinity() && rightHigh.toDouble() != 0)
+				hh = leftHigh.toDouble() / rightHigh.toDouble();
+			
+			// Find the minimum and maximum of these divisions
+			double min = Double.POSITIVE_INFINITY;
+			double max = Double.NEGATIVE_INFINITY;
+			
+			for (double val : new double[] { ll, lh, hl, hh }) {
+				if (val != Double.NEGATIVE_INFINITY && val < min)
+					min = val;
+				if (val > max)
+					max = val;
+			}
+			
+			// Handle the case where all values were infinities
+			if (min == Double.POSITIVE_INFINITY)
+				min = Double.NEGATIVE_INFINITY;
+			if (max == Double.NEGATIVE_INFINITY)
+				max = Double.POSITIVE_INFINITY;
+			
+			// Round the result values according to precision
+			double roundedMin = min == Double.NEGATIVE_INFINITY ? min : roundValue(min);
+			double roundedMax = max == Double.POSITIVE_INFINITY ? max : roundValue(max);
+			
+			// Create MathNumber objects with the rounded values
+			MathNumber newLow = roundedMin == Double.NEGATIVE_INFINITY ? 
+					MathNumber.MINUS_INFINITY : new MathNumber(roundedMin);
+			MathNumber newHigh = roundedMax == Double.POSITIVE_INFINITY ? 
+					MathNumber.PLUS_INFINITY : new MathNumber(roundedMax);
+			
+			// Create the result interval with the proper bounds
+			return new RoundedInterval(new IntInterval(newLow, newHigh), roundingDirection, precision);
+		} catch (Exception e) {
+			// In case of any mathematical errors, return top
+			return top();
+		}
+	}
+	
 	@Override
 	public RoundedInterval evalBinaryExpression(
 			BinaryOperator operator,
@@ -262,48 +575,19 @@ public class RoundedInterval
 			// operands is top
 			return top();
 
-		// Combine the rounding modes - take the most extreme one
-		int newRoundingMode = (left.roundingMode != 0) ? left.roundingMode : right.roundingMode;
+		// Take the most conservative rounding direction and the minimum precision
+		int newRoundingDirection = (left.roundingDirection != 0) ? left.roundingDirection : right.roundingDirection;
+		int newPrecision = Math.min(left.precision, right.precision);
 
-		try {
-			if (operator instanceof AdditionOperator)
-				return applyRounding(left.interval.plus(right.interval));
-			else if (operator instanceof SubtractionOperator)
-				return applyRounding(left.interval.diff(right.interval));
-			else if (operator instanceof MultiplicationOperator) {
-				if (left.equals(ZERO) || right.equals(ZERO))
-					return new RoundedInterval(IntInterval.ZERO, newRoundingMode);
-				else {
-					// Special care for multiplication which can increase rounding errors
-					IntInterval result = left.interval.mul(right.interval);
-					RoundedInterval roundedResult = new RoundedInterval(result, newRoundingMode);
-					// If both operands have the same rounding direction, we intensify the effect
-					if (left.roundingMode == right.roundingMode && left.roundingMode != 0) {
-						return applyRounding(result);
-					}
-					return applyRounding(result);
-				}
-			} else if (operator instanceof DivisionOperator) {
-				if (right.equals(ZERO))
-					return bottom();
-				else if (left.equals(ZERO))
-					return new RoundedInterval(IntInterval.ZERO, newRoundingMode);
-				else if (left.isTop() || right.isTop())
-					return top();
-				else {
-					// Division almost always requires rounding for non-integer results
-					IntInterval result = left.interval.div(right.interval, false, false);
-					if (result == null || result.equals(IntInterval.MINUS_ONE))
-						return bottom();
-
-					// Always apply rounding to division results, even if roundingMode is 0
-					int divRoundingMode = (newRoundingMode != 0) ? newRoundingMode : 1; // Default to round up for safety
-					return new RoundedInterval(result, divRoundingMode);
-				}
-			}
-
-		} catch (MathNumberConversionException e) {
-			return top();
+		// Use our precise operation methods instead of IntInterval operations
+		if (operator instanceof AdditionOperator) {
+			return preciseAdd(left, right, newRoundingDirection, newPrecision);
+		} else if (operator instanceof SubtractionOperator) {
+			return preciseSubtract(left, right, newRoundingDirection, newPrecision);
+		} else if (operator instanceof MultiplicationOperator) {
+			return preciseMultiply(left, right, newRoundingDirection, newPrecision);
+		} else if (operator instanceof DivisionOperator) {
+			return preciseDivide(left, right, newRoundingDirection, newPrecision);
 		}
 
 		return top();
@@ -338,10 +622,14 @@ public class RoundedInterval
 			return environment.bottom();
 
 		boolean lowIsMinusInfinity = eval.interval.getLow().isMinusInfinity();
-		RoundedInterval low_inf = new RoundedInterval(eval.interval.getLow(), MathNumber.PLUS_INFINITY, eval.roundingMode);
-		RoundedInterval lowp1_inf = new RoundedInterval(eval.interval.getLow().add(MathNumber.ONE), MathNumber.PLUS_INFINITY, eval.roundingMode);
-		RoundedInterval inf_high = new RoundedInterval(MathNumber.MINUS_INFINITY, eval.interval.getHigh(), eval.roundingMode);
-		RoundedInterval inf_highm1 = new RoundedInterval(MathNumber.MINUS_INFINITY, eval.interval.getHigh().subtract(MathNumber.ONE), eval.roundingMode);
+		RoundedInterval low_inf = new RoundedInterval(eval.interval.getLow(), MathNumber.PLUS_INFINITY, 
+		                                             eval.roundingDirection, eval.precision);
+		RoundedInterval lowp1_inf = new RoundedInterval(eval.interval.getLow().add(MathNumber.ONE), MathNumber.PLUS_INFINITY, 
+		                                              eval.roundingDirection, eval.precision);
+		RoundedInterval inf_high = new RoundedInterval(MathNumber.MINUS_INFINITY, eval.interval.getHigh(), 
+		                                             eval.roundingDirection, eval.precision);
+		RoundedInterval inf_highm1 = new RoundedInterval(MathNumber.MINUS_INFINITY, eval.interval.getHigh().subtract(MathNumber.ONE), 
+		                                               eval.roundingDirection, eval.precision);
 
 		RoundedInterval update = null;
 		if (operator == ComparisonEq.INSTANCE)
