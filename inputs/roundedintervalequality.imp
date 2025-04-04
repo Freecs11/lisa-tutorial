@@ -1,0 +1,28 @@
+class rounded_interval_equality {
+    test_rounded_and_equality() {
+        // Initial values
+        def x = 3.14;    // For testing RoundedInterval
+        def y = 3.14;    // Same value as x to test equality
+        def z = y;       // Create an equality relation z = y
+        
+        // Operations for RoundedInterval to track
+        x = x + 2.5;     // Now x = 5.64
+        y = y * 2.0;     // Now y = 6.28
+        
+        // Test equality relations
+        def a = z;       // a = z = y (equality chain)
+        
+        // Now test both domains together
+        if (x < 6.0) {
+            // RoundedInterval knows x is 5.64
+            y = x;       // Now y = x = 5.64
+            z = z + 0.5; // Now z = 6.78
+            
+            // Equality domain knows y = x, but no longer y = z
+        }
+        
+        // Final operation to test precision and equality
+        def result = y / 2.0;  // RoundedInterval tracks the numeric result
+        def eq_test = (a == z); // Equality domain knows a = z
+    }
+}
