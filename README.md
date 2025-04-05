@@ -1,13 +1,49 @@
-# LiSA tutorials
+    # LiSA Tutorial Project
 
-This repository contains the code developed and used during LiSA's tutorials. Every tutorial is listed together with a link to the slides used and the tag of the code shown during the tutorial itself.
+## Development History
 
-## Tutorials given
+**Domain Implementations:**
 
-- PLDI '24 [[slides]](https://docs.google.com/presentation/d/1-oFl5Lgg-6mu0IdXMv8u-9w_ypc1aYbg-t_t8HVQBjw/edit?usp=sharing) [[code used]](https://github.com/lisa-analyzer/lisa-tutorial/releases/tag/pldi24)
+- **Equality Domain** (`Equality.java`)  
+  Developed by TRUONG Do
 
-- Lipari Summer School '24 [[slides]](https://docs.google.com/presentation/d/16MYOHTZJuuzuym9tcIH4L2r24Kn11vjAq7vpyTGcv14/edit?usp=sharing) [[code used]](https://github.com/lisa-analyzer/lisa-tutorial/releases/tag/lipari24)
+  - Equality propagation through assignments
+  - Conditional branch analysis
+  - Loop relationship tracking
 
-- Ca' Foscari PhD Course - [[code used]](https://github.com/lisa-analyzer/lisa-tutorial/releases/tag/ssv24)
+- **RoundedInterval Domain** (`RoundedInterval.java`)  
+  Developped by BOUHMAD Rachid
 
-- Seminar at University of Verona - [[code used]](https://github.com/lisa-analyzer/lisa-tutorial/releases/tag/univr25)
+  - Arithmetic operation rounding (+, -, \*, /)
+  - Widening/narrowing operators
+  - Precision-aware interval merging
+
+- **Cartesian Product** (`RoundedIntervalEqualityCartesian.java`)  
+  Worked on by BOUHMAD Rachid
+  - Parallel state maintenance
+  - Cross-domain information sharing
+  - Combined result reporting
+
+## IMP Program Analysis
+
+### Equality Domain Tests (`inputs/equality.imp`)
+
+Written by Rachid BOUHMAD
+
+### RoundedInterval Tests (`inputs/roundedinterval.imp`)
+
+Written by TRUONG Do
+
+### Combined Analysis (`inputs/roundedintervalequality.imp`)
+
+Written by BOUHMAD Rachid
+
+## Test Classes
+
+- **Equality Tests** (`EqualityTest.java`)
+
+- **RoundedInterval Tests** (`RoundedIntervalTest.java`)
+
+- **Combined Analysis Tests** (`RoundedIntervalEqualityTest.java`)
+
+## Analysis
